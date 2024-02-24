@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <script src="./src/js/jquery.js"></script>
+</head>
+<body>
+    
+    <div id="loading" style="z-index: 5; width: 100vw; height: 100vh; background-color: wheat; display: flex; position: fixed; align-items: center; justify-content: center;">
+        <i><h2 id="loadingtext" style="text-align: center;"></h2></i>
+    </div>
+
+    <script type="module">
+        
+        import { io } from "./src/js/socket-io.js";
+        
+        let canvas = document.createElement('canvas');
+        canvas.width = 2048;
+        canvas.height = 2048;
+        canvas.style.backgroundColor = 'rgb(1, 1, 15)';
+        
+        document.getElementById('game').appendChild(canvas);
+        
+        let ctx  = canvas.getContext('2d');
+        let Size = 16;
+        let color = '';
+        
+        let connection = io('http://' + document.location.host);
+        let completedTransfering = false;
+        let loadBlockCompleted = false;
+        let loadedblockRate = new Object();
+        
+        // queue
+        let blockQueue = [];
+        let partblockQueue = [];
+        let removeQueue = [];
+        let removeblockQueue = [];
+        let removeandDrawQueue = [];
+        let bulkremoveandDrawQueue = [];
+
+        let allOk = false;
+
+        connection.on('draw', async(data) => {
+            console.log(data);
+            blockQueue.push(data);
+        });
+
+        connection.on('bulk-draw', async(data) => {
+            partblockQueue.push(data);
+        });
+
+        connection.on('remove&draw', async(data) => {
+            removeandDrawQueue.push(data);
+        });
+        
+        connection.on("bulk-remove&draw", async(data) => {
+            bulkremoveandDrawQueue.push(data);
+        });
+
+        connection.on('remove-draw', async(data) => {
+            removeQueue.push(data);
+        });
+        connection.on('bulk-remove-draw', async(data) => {
+            removeblockQueue.push(data);
+        })
+
+
+
+        async function blockQueueListener() {
+            setInterval(() => {
+                if (allOk == true) {
+                    ctx.beginPath();
+                    let data = blockQueue.shift();
+                    if (data != undefined) {
+                        let img = new Image(Size, Size);
+                        img.onload = function() {
+                            ctx.clearRect(data.x, data.y, 16, 16);
+                            ctx.drawImage(img, data.x, data.y);                         
+                        }
+                        img.src = data.color;
+
+                    }
+
+                    let pbdata = partblockQueue.shift();
+
+                    if (pbdata != undefined) {
+                        let imagesLoaded = 0;
+                        let totalImages = Object.keys(pbdata).length;
+
+                        Object.keys(pbdata).forEach(key => {
+                            let img = new Image();
+                            img.onload = function() {
+                                imagesLoaded++;
+
+                                if (imagesLoaded === totalImages) {
+                                    drawImages();
+                                }
+                            };
+                            img.src = pbdata[key].color;
+                            pbdata[key].image = img;
+                        });
+                    }
+
+                    function drawImages() {
+                        Object.keys(pbdata).forEach(key => {
+                            let imageData = pbdata[key];
+                            ctx.clearRect(imageData.x, imageData.y, 16, 16);
+                            ctx.drawImage(imageData.image, imageData.x, imageData.y);
+
+                        });
+                    }
+
+                    let data_delete = removeQueue.shift();
+                    if (data_delete != undefined) {
+                        ctx.clearRect(data_delete.x, data_delete.y, 16, 16);
+                    }
+
+                    let bulkdata_delete = removeblockQueue.shift();
+                    if (bulkdata_delete != undefined) {
+                        Object.keys(bulkdata_delete).forEach(key => {
+                            ctx.clearRect(bulkdata_delete[key].x, bulkdata_delete[key].y, Size, Size);
+                        });
+                    }
+
+                    let remdraw_dat = removeandDrawQueue.shift();
+                    if (remdraw_dat != undefined) {
+
+                        ctx.clearRect(remdraw_dat[0].x, remdraw_dat[0].y, Size, Size);
+                        let img = new Image();
+                        img.onload = function() {
+                            ctx.drawImage(img, remdraw_dat[1].x, remdraw_dat[1].y);
+                        }
+                        img.src = remdraw_dat[1].color;
+
+                    }
+
+                    ctx.closePath();
+                }
+
+
+            }, 1000 / 120); // 120 FPS
+        }
+
+        
+        // Dinleyicileri aktifleştirme
+        blockQueueListener();
+
+        let mouseProperties = {
+            x: 0,
+            y: 0,
+            mousedown: false,
+            mouse_enter: false
+        };
+        
+        canvas.addEventListener('mousemove', (data) => {
+            mouseProperties.x = data.offsetX;
+            mouseProperties.y = data.offsetY;
+
+        });
+
+        setInterval(async() => {
+            if (mouseProperties.mousedown == true && mouseProperties.mouse_enter == true) {
+            let x = mouseProperties.x - Size, y = mouseProperties.y - Size;
+            
+            if (color == '') {
+                return;
+            }
+
+            if (x % Size != 1) {
+                x = Math.floor(x + (Size - (x % Size)));
+            }
+
+            if (y % Size != 1) {
+                y = Math.floor(y + (Size - (y % Size)));
+            }
+            if (x % 2 == 1) {
+                x -= 1;
+            }
+            if (y % 2 == 1) {
+                y -= 1;
+            }
+            connection.emit('draw', {x, y, color});
+
+            }
+        }, 1000 / 40); // 40 FPS
+
+
+        canvas.addEventListener('mouseenter', () => {
+            mouseProperties.mouse_enter = true;
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            mouseProperties.mousedown = false;
+            mouseProperties.mouse_enter = false;
+        });
+
+        canvas.addEventListener('mouseup', (data) => {
+            mouseProperties.mousedown = false;
+        });
+        
+        document.addEventListener('keydown', (press) => {
+            if (press.key.toLowerCase() == 'x' && mouseProperties.mousedown == false) {
+
+                let x = mouseProperties.x - Size, y = mouseProperties.y - Size;
+                if (x % Size != 1) {
+                    x = Math.floor(x + (Size - (x % Size)));
+                }
+
+                if (y % Size != 1) {
+                    y = Math.floor(y + (Size - (y % Size)));
+                }
+                if (x % 2 == 1) {
+                    x -= 1;
+                }
+                if (y % 2 == 1) {
+                    y -= 1;
+                }
+                connection.emit('remove-draw', {x, y});
+            }
+        });
+
+        canvas.addEventListener('mousedown', (data) => {
+            mouseProperties.mousedown = true;
+
+        });
+
+
+        let last = undefined;
+        connection.on('load-block', (block) => {
+            
+            if (block == true) {
+                loadBlockCompleted = true;
+                return;
+            }
+
+            loadedblockRate[block] = false;
+
+            let button = document.createElement('button');
+            button.classList.add('block');
+            button.style.backgroundImage = 'url("'+block+'")';
+
+            $.get(block, [], function() {
+
+                document.getElementById('blocks').appendChild(button);
+            
+                button.addEventListener('click', () => {
+                    color = block;
+
+                    if (last != undefined) {
+                        last.classList.remove('block-selected');
+                    }
+
+                    last = button;
+                    button.classList.add('block-selected');
+                });
+                loadedblockRate[block] = true;
+            });
+
+        });
+
+        connection.on('new-message', msg => {
+            let element = document.createElement('div');
+            element.style.paddingTop = '1.5px';
+            element.style.paddingBottom = '1.5px';
+            element.style.backgroundColor = 'rgba(255, 255, 255 0.5);';
+            element.innerHTML = "<div style='color: red;'>"+msg.username+"</div>"+
+            "<div style='color: white; font-weight: bold;'>"+msg.message+"</div>";
+            document.getElementById('messages').appendChild(element);
+        });
+
+        connection.on('done', () => {
+            completedTransfering = true;
+        });
+
+        await new Promise((res,rej) => {
+                
+                let intervalID = setInterval(async () => {
+                    if (completedTransfering == true) {
+
+                        let count = 0;
+                        let okcount = 0;
+                        await Object.keys(loadedblockRate).forEach(key => {
+                            count+=1;
+                            if (loadedblockRate[key] == true) {
+                                okcount += 1;
+                            }
+                        });
+                        
+                        if (count == okcount) {
+                            clearInterval(intervalID);
+                            res();
+                            document.getElementById('loading').remove();
+                            allOk = true;
+                        }  else {
+                            let hesaplama = Math.round((100 / count) * okcount);
+                            document.getElementById('loadingtext').innerHTML = 'Kaynaklar Yükleniyor <br>' + hesaplama + '%';
+                        }
+
+                    } else {
+                        document.getElementById('loadingtext').innerHTML = 'Veri Yükleniyor';
+                    }
+                }, 1);
+        });
+
+        let username = 'Oyuncu_' + Math.floor(Math.random() * 99999);
+        document.getElementById('msgcontent').addEventListener('keyup', (event) => {
+            if (event.key == 'Enter') {
+                let message = $('#msgcontent').val();
+                $('#msgcontent').val('');
+                connection.emit('message', {username, message});
+            }
+        })
+
+    </script>
+    
+    <style>
+        * {
+            padding: 0;
+            margin: 0;
+        }
+        .block {
+            padding-top: 20px;
+            padding-bottom: 20px;
+            padding-left: 20px;
+            padding-right: 20px;
+            background-color: white;
+            background-repeat: no-repeat;
+            background-position: center;
+            object-fit: cover;
+            border-style: solid;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        
+        .block:hover {
+            opacity: 0.5;
+        }
+
+        .block-selected {
+            border-color: green !important;
+        }
+        
+
+    </style>
+    <div frameborder="0" id="game" style="overflow-y: auto; overflow-x: auto; width: 100vw; height: 100vh;">
+    
+        <div id="blocks" style="position: fixed; overflow-x: auto; width: 100vw; background-color: gray; display: flex; gap: 1px; padding-top: 16px; padding-bottom: 16px;"></div>        
+        <div id="chat" style="z-index: 3; position: fixed; bottom: 0; display: flex; flex-direction: column; right: 0; opacity: 0.85; margin-right: 5px; margin-bottom: 5px; background-color: black; border-style: solid; border-color: green; border-style: 12px; color: white; padding: 5px; width: 20vw; height: 40vh;">
+            <div style="border-style: solid; border-color: green; padding: 2px; text-align: center;">Sohbet</div>
+            <div style="flex-grow: 1; display: flex; padding: 0; flex-direction: column; overflow-x: hidden;">
+                <div id="messages" style="padding: 0; flex-grow: 1; width: 100%; display: flex; height: 60vh; flex-direction: column; overflow-y: auto;">
+                    
+                </div>
+                <div style="height: 10vh;">
+                    
+                <input type="text" id="msgcontent" style="width: 100%;" placeholder="Göndermek için 'Enter' Tuşuna Basın.">
+                </div>
+            </div>
+        </div>
+
+    </div>
+</body>
+</html>

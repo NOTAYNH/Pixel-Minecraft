@@ -1,0 +1,1 @@
+let flowerJS = require('./template/flower.js'); module.exports = flowerJS;
