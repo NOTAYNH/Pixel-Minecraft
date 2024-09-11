@@ -192,5 +192,3 @@ async function main() {
 main();
 module.exports.utils = utils;
 module.exports.config = config;
-
-// anana sokuş = bitiş
